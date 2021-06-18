@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import (
     Callback,
     LightningDataModule,
@@ -10,6 +10,7 @@ from pytorch_lightning import (
     seed_everything,
 )
 from pytorch_lightning.loggers import LightningLoggerBase
+from torchvision import transforms
 
 from src.utils import utils
 
@@ -31,13 +32,35 @@ def train(config: DictConfig) -> Optional[float]:
     if "seed" in config:
         seed_everything(config.seed, workers=True)
 
+    # Init transforms
+    log.info("Instantiating transforms")
+    if "train_transforms" in config:
+        train_transforms = hydra.utils.instantiate(config.train_transforms)
+    else:
+        train_transforms = None
+    if "test_transforms" in config:
+        test_transforms = hydra.utils.instantiate(config.test_transforms)
+    else:
+        test_transforms = None
     # Init Lightning datamodule
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule,
+                                                              train_transforms=train_transforms,
+                                                              test_transforms=test_transforms)
 
     # Init Lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(config.model)
+
+    # Init Optimizer and Scheduler
+    log.info(f"Instantiating optimizer <{config.optimizer._target_}> and scheduler <{config.scheduler._target_}>")
+    optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
+    scheduler = hydra.utils.instantiate(config.scheduler, optimizer=optimizer)
+    scheduler_interval = config.scheduler_interval
+
+    def configure_optimizers():
+        return [optimizer], [{'scheduler': scheduler, 'interval': scheduler_interval}]
+    model.configure_optimizers = configure_optimizers
 
     # Init Lightning callbacks
     callbacks: List[Callback] = []
@@ -77,9 +100,9 @@ def train(config: DictConfig) -> Optional[float]:
     trainer.fit(model=model, datamodule=datamodule)
 
     # Evaluate model on test set after training
-    if not config.trainer.get("fast_dev_run"):
-        log.info("Starting testing!")
-        trainer.test()
+    # if not config.trainer.get("fast_dev_run"):
+    #     log.info("Starting testing!")
+    #     trainer.test()
 
     # Make sure everything closed properly
     log.info("Finalizing!")

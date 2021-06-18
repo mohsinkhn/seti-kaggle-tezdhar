@@ -1,0 +1,13 @@
+_target_: src.datamodules.pldatamodule.SetiDataModule
+
+data_dir: ${data_dir}  # data_dir is specified in config.yaml
+train_file: 'train_labels.csv'
+test_file: 'sample_submission.csv'
+val_splits: 5
+val_fold: 0
+kfold_split_seed: 12345786
+batch_size: 32
+num_workers: 0
+pin_memory: False
+power: 0.75
+norm: 1

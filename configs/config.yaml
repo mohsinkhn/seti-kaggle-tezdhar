@@ -2,16 +2,16 @@
 
 # specify here default training configuration
 defaults:
-  - trainer: minimal.yaml
-  - model: mnist_model.yaml
-  - datamodule: mnist_datamodule.yaml
+  - trainer: default.yaml
+  - model: plmodel.yaml
+  - datamodule: pldatamodule.yaml
   - callbacks: default.yaml # set this to null if you don't want to use callbacks
-  - logger: null # set logger here or use command line (e.g. `python run.py logger=wandb`)
-
+  - logger: wandb # set logger here or use command line (e.g. `python run.py logger=wandb`)
+  - optimizer: adam.yaml
+  - scheduler: onecycle.yaml
   - experiment: null
   - hparams_search: null
-
-  - hydra: default.yaml
+  - hydra: exp.yaml
 
   # enable color logging
   - override hydra/hydra_logging: colorlog
@@ -25,6 +25,7 @@ work_dir: ${hydra:runtime.cwd}
 
 # path to folder with data
 data_dir: ${work_dir}/data/
+scheduler_interval: 'step'
 
 # use `python run.py debug=true` for easy debugging!
 # this will run 1 train, val and test loop with only 1 batch

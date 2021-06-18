@@ -1,0 +1,6 @@
+# output paths for hydra logs
+run:
+  dir: logs/runs/${experiment_name}/${model.backbone}/${datamodule.val_fold}
+sweep:
+  dir: logs/multiruns/${experiment_name}/${model.backbone}/${datamodule.val_fold}/
+  subdir: ${hydra.job.num}

@@ -1,0 +1,7 @@
+_target_: torch.optim.lr_scheduler.OneCycleLR
+max_lr: 0.001
+pct_start: 0.1
+div_factor: 100
+final_div_factor: 100
+steps_per_epoch: 1255
+epochs: ${trainer.max_epochs}

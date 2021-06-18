@@ -1,0 +1,122 @@
+# @package _global_
+
+# to execute this experiment run:
+# python run.py experiment=example_full.yaml
+
+defaults:
+  - override /trainer: null # override trainer to null so it's not loaded from main config defaults...
+  - override /model: null
+  - override /datamodule: null
+  - override /callbacks: null
+  - override /logger: null
+  - override /optimizer: null
+  - override /scheduler: null
+
+
+# we override default configurations with nulls to prevent them from loading at all
+# instead we define all modules and their paths directly in this config,
+# so everything is stored in one place
+
+seed: 786
+experiment_name: effv2s_norm1_p05_umixup_corr
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  gpus: 1
+  min_epochs: 1
+  max_epochs: 40
+  gradient_clip_val: 5
+  accumulate_grad_batches: 1
+  weights_summary: 'top'
+  precision: 16
+  num_sanity_val_steps: 4
+  deterministic: True
+  benchmark: False
+
+datamodule:
+  _target_: src.datamodules.pldatamodule.SetiDataModule
+  data_dir: ${data_dir}  # data_dir is specified in config.yaml
+  train_file: 'train_labels.csv'
+  test_file: 'sample_submission.csv'
+  val_fold: 0
+  batch_size: 18
+  num_workers: 8
+  pin_memory: True
+  power: 0.5
+  norm: 1
+  channels: 1
+  validation_scheme: 'KFold'
+  validation_kws:
+    shuffle: True
+    random_state: 786
+    n_splits: 5
+
+train_transforms:
+  _target_: albumentations.Compose
+  transforms:
+    - _target_: albumentations.Resize
+      height: 512
+      width: 512
+      interpolation: 4
+    - _target_: albumentations.Normalize
+      mean: 0.5
+      std: 0.5
+      max_pixel_value: 1.0
+
+test_transforms:
+  _target_: albumentations.Compose
+  transforms:
+    - _target_: albumentations.Resize
+      height: 512
+      width: 512
+      interpolation: 4
+    - _target_: albumentations.Normalize
+      mean: 0.5
+      std: 0.5
+      max_pixel_value: 1.0
+
+model:
+  _target_: src.models.plmodels.LitModel
+  base_model: 'SimpleBB'
+  backbone: 'tf_efficientnet_b0_ns'
+  dropout: 0.05
+  use_mixup: True
+  mixup_untied: True
+  mixup_alpha: 1.0
+
+optimizer:
+  _target_: timm.optim.AdamW
+  lr: 0.001
+  weight_decay: 0.01
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  max_lr: 0.003
+  steps_per_epoch: 2229
+  epochs: ${trainer.max_epochs}
+  pct_start: 0.1
+  div_factor: 100
+  final_div_factor: 100
+
+scheduler_interval: 'step'
+
+callbacks:
+  model_checkpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: "val/auc"
+    save_top_k: 2
+    save_last: True
+    mode: "max"
+    dirpath: "checkpoints/"
+    filename: "{epoch:02d}-{val/auc:6.4f}"
+
+logger:
+  wandb:
+    _target_: pytorch_lightning.loggers.wandb.WandbLogger
+    project: "seti-kaggle"
+    name: "${experiment_name}_${datamodule.val_fold}_${seed}"
+    tags: ["${model.backbone}", "fold_${datamodule.val_fold}", "norm_${datamodule.norm}"]
+    notes: ""
+    id: 
+      _target_: wandb.util.generate_id
+

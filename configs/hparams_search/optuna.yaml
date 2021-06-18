@@ -9,7 +9,7 @@ defaults:
   - override /hydra/sweeper: optuna
 
 # choose metric which will be optimized by Optuna
-optimized_metric: "val/acc"
+optimized_metric: "val/auc"
 
 hydra:
   # here we define Optuna hyperparameter search
@@ -18,7 +18,7 @@ hydra:
   sweeper:
     _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: null
-    study_name: null
+    study_name: ${experiment}
     n_jobs: 1
 
     # 'minimize' or 'maximize' the objective
@@ -43,19 +43,21 @@ hydra:
 
     # define range of hyperparameters
     search_space:
-      datamodule.batch_size:
+      datamodule.power:
         type: categorical
-        choices: [32, 64, 128]
+        choices: [0.25, 0.5, 0.75]
       model.lr:
         type: float
         low: 0.0001
-        high: 0.2
-      model.lin1_size:
+        high: 0.003
+      model.dropout:
+        type: float
+        low: 0.0
+        high: 0.5
+      model.weight_decay:
+        type: float
+        low: 0.00001
+        high: 0.01
+      model.backbone:
         type: categorical
-        choices: [32, 64, 128, 256, 512]
-      model.lin2_size:
-        type: categorical
-        choices: [32, 64, 128, 256, 512]
-      model.lin3_size:
-        type: categorical
-        choices: [32, 64, 128, 256, 512]
+        choices: ['efficientnetv2_rw_s', 'resnest18d', 'resnest26d']
