@@ -47,6 +47,7 @@ class SetiDataModule(LightningDataModule):
         validation_kws=None,
         train_transforms=None,
         test_transforms=None,
+        multiobjective=False,
         **kwargs,
     ):
         super().__init__()
@@ -65,6 +66,7 @@ class SetiDataModule(LightningDataModule):
         self.channels = channels
         self.validation_scheme = validation_scheme
         self.validation_kws = validation_kws
+        self.multiobjective = multiobjective
         if self.validation_kws is None:
             self.validation_kws = {}
 
@@ -99,7 +101,8 @@ class SetiDataModule(LightningDataModule):
             power=self.power,
             norm=self.norm,
             preload=False,
-            channels=self.channels
+            channels=self.channels,
+            multiobjective=self.multiobjective
         )
 
         self.val_data = ds_cls(
@@ -112,7 +115,8 @@ class SetiDataModule(LightningDataModule):
             power=self.power,
             norm=self.norm,
             preload=False,
-            channels=self.channels
+            channels=self.channels,
+            multiobjective=self.multiobjective
         )
 
         self.test_data = ds_cls(
@@ -125,7 +129,8 @@ class SetiDataModule(LightningDataModule):
             power=self.power,
             norm=self.norm,
             preload=False,
-            channels=self.channels
+            channels=self.channels,
+            multiobjective=self.multiobjective
         )
 
     def train_dataloader(self):

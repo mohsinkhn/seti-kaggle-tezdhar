@@ -11,6 +11,80 @@ class SimpleBB(nn.Module):
         del self.model.classifier
         self.avg = nn.AdaptiveAvgPool2d((1, 1))
         self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(self.model.num_features, 1)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        return self.fc1(self.drop(self.flat(self.avg(x))))
+
+
+class MultiBB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
+        del self.model.classifier
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(self.model.num_features * 2, 1)
+
+    def forward(self, x1, x2):
+        x1 = self.flat(self.avg(self.model.forward_features(x1)))
+        x2 = self.flat(self.avg(self.model.forward_features(x2)))
+        x = torch.cat([x1, x2], -1)
+        return self.fc1(self.drop(x))
+
+
+class BackgroundAttenuation(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
+        del self.model.classifier
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.bn2 = nn.BatchNorm2d(320)
+        self.fc1 = nn.Linear(320, 1)
+
+    def forward(self, x1, x2):
+        x1 = self.model.conv_stem(x1)
+        x2 = self.model.conv_stem(x2)
+        x2attn = torch.sigmoid(x2)
+        x1 = x1 * (1 - x2attn)
+        x1 = self.model.blocks(self.model.act1(self.model.bn1(x1)))
+        x2 = self.model.blocks(self.model.act2(self.model.bn1(x2)))
+        x1 = x1 * (1 - torch.sigmoid(x2))
+        x1 = self.model.global_pool(self.model.act2(self.bn2(x1)))
+        return self.fc1(self.drop(x1))
+
+
+class TfmBB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, num_classes=1)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class Ch2(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=2, num_classes=1)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class SimpleStride1(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
+        self.model.conv_stem.stride = (1, 1)
+        # del self.model.classifier
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
         self.fc1 = nn.Linear(self.model.num_features, 1)
 
     def forward(self, x):
@@ -113,8 +187,6 @@ class Ch6(nn.Module):
         x2 = self.flat(self.avg(x2) + self.max(x2))
         x = torch.cat((x1, x2), -1)
         return self.fc1(self.drop(x))
-
-
 
 
 class SetiCNN9(nn.Module):

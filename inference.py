@@ -1,6 +1,7 @@
 import argparse
+import json
 
-from hydra.utils import instantiate
+import hydra
 import numpy as np
 from omegaconf import OmegaConf
 import pandas as pd
@@ -11,68 +12,86 @@ from torch import nn
 from tqdm import tqdm
 
 
-def valid_preds(model, datamodule, device):
-    model.eval()
-    model.to(device)
-    preds = []
-    targets = []
-    with torch.no_grad():
-        for batch in tqdm(datamodule.val_dataloader()):
-            x, y = batch['im'], batch['label']
-            x, y = x.to(device), y.to(device)
-            logits = model(x)
-            yhat = torch.sigmoid(logits)
-            preds.append(yhat)
-            targets.append(y)
-    preds = torch.cat(preds, 0).cpu().numpy()[:, 0]
-    targets = torch.cat(targets, 0).cpu().numpy()
-    print("Valid score: ", roc_auc_score(targets, preds))
-    return preds
-
-
-def test_preds(model, datamodule, device):
-    model.eval()
-    model.to(device)
-    preds = []
-    with torch.no_grad():
-        for i, batch in enumerate(tqdm(datamodule.test_dataloader())):
-            x, y = batch['im'], batch['label']
-            x, y = x.to(device), y.to(device)
-            logits = model(x)
-            yhat = torch.sigmoid(logits)
-            preds.append(yhat)
-    preds = torch.cat(preds, 0).cpu().numpy()[:, 0]
-    return preds
+def load_json_config(experiment_folder, model_name, fold):
+    path = str(Path(BASE_PATH) / experiment_folder / model_name / fold / 'config_all.json')
+    with open(path, "r") as fp:
+        cfg = json.load(fp)
+    omega_cfg = OmegaConf.create(cfg)
+    return omega_cfg
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device")
-    parser.add_argument("--type")
-    parser.add_argument("--model_path")
-    parser.add_argument("--cfg")
-    parser.add_argument("--val_fold", type=int)
+    parser.add_argument("--experiment_folder")
+    parser.add_argument("--backbone_name")
+    parser.add_argument("--folds", type=str)
+    parser.add_argument("--output_folder", default="data/predictions")
     args = parser.parse_args()
-    ITYPE = args.type
-    model_ckpt = args.model_path  # "./logs/runs/vs_effv2s_mixup_augs_obsp8/efficientnetv2_rw_s/0/checkpoints/epoch=17-val/auc=0.9893.ckpt"
-    cfg = OmegaConf.load(args.cfg)
-    cfg.data_dir = "./data"
-    #cfg.datamodule.power = 0.4
-    cfg.datamodule.val_fold = args.val_fold
-    print(cfg)
-    model = instantiate(cfg.model)
-    model.load_state_dict(torch.load(model_ckpt, map_location=args.device)["state_dict"])
-    datamodule = instantiate(cfg.datamodule)
-    datamodule.setup()
-    if ITYPE == "OOF":
-        preds = valid_preds(model, datamodule, device=args.device)
-        ids = datamodule.val_data.ids
-        df = pd.DataFrame({"id": ids, "target": preds})
-        df.to_csv(f"data/oof_{cfg.experiment_name}_{cfg.datamodule.val_fold}.csv", index=False)
-    else:
-        preds = test_preds(model, datamodule, device=args.device)
-        ids = datamodule.test_data.ids
-        df = pd.DataFrame({"id": ids, "target": preds})
-        df.to_csv(f"data/sub_{cfg.experiment_name}_{cfg.datamodule.val_fold}.csv", index=False)
 
-    
+    BASE_PATH = "./logs/runs"
+    USE_CKPTS = 2
+    DEVICE = 1
+    val_preds_list, val_labels_list, val_ids_list, test_preds_list, test_ids_list = [], [], [], [], []
+    for fold in args.folds.split(","):
+        config = load_json_config(args.experiment_folder, args.backbone_name, fold)
+        print(config)
+        config.trainer.gpus = [DEVICE]
+        config.datamodule.val_fold = int(fold)
+        search_path = Path(BASE_PATH) / args.experiment_folder / args.backbone_name / fold / "checkpoints"
+        checkpoints = list((search_path).glob("*.ckpt"))
+        checkpoints = sorted(checkpoints, key=lambda x: float(x.stem.split("=")[-1]), reverse=True)[:USE_CKPTS]
+
+        if "train_transforms" in config:
+            train_transforms = hydra.utils.instantiate(config.train_transforms)
+        else:
+            train_transforms = None
+        if "test_transforms" in config:
+            test_transforms = hydra.utils.instantiate(config.test_transforms)
+        else:
+            test_transforms = None
+        # Init Lightning datamodule
+        print(f"Instantiating datamodule <{config.datamodule._target_}>")
+        datamodule = hydra.utils.instantiate(config.datamodule,
+                                             train_transforms=train_transforms,
+                                             test_transforms=test_transforms)
+        datamodule.setup()
+
+        # Init Lightning model
+        print(f"Instantiating model <{config.model._target_}>")
+        model = hydra.utils.instantiate(config.model)
+
+        # Init Lightning trainer
+        print(f"Instantiating trainer <{config.trainer._target_}>")
+        trainer = hydra.utils.instantiate(
+            config.trainer
+        )
+        trainer.logger = None
+
+        # Test the model
+        val_preds_fold, test_preds_fold = [], []
+        print("Starting testing!")
+        for checkpoint in checkpoints:
+            print(f"Checking for {checkpoint}")
+            model.load_state_dict(torch.load(checkpoint, map_location=f"cuda:{DEVICE}")["state_dict"])
+            val_preds = trainer.test(model, datamodule.val_dataloader())[0]['outputs']
+            test_preds = trainer.test(model, datamodule.test_dataloader())[0]['outputs']
+            val_labels = datamodule.val_data.labels
+            val_ids = datamodule.val_data.ids
+            test_ids_list = datamodule.test_data.ids
+            val_preds_fold.append(val_preds)
+            test_preds_fold.append(test_preds)
+        val_preds_fold = np.mean(val_preds_fold, 0)
+        test_preds_fold = np.mean(test_preds_fold, 0)
+        val_preds_list.extend(val_preds_fold)
+        val_labels_list.extend(val_labels)
+        val_ids_list.extend(val_ids)
+        test_preds_list.append(test_preds_fold)
+    val_preds_list, val_labels_list = np.array(val_preds_list), np.array(val_labels_list)
+    test_preds_list = np.mean(test_preds_list, 0)
+    val_df = pd.DataFrame({'id': val_ids_list, 'target': val_labels_list, 'preds': val_preds_list})
+    test_df = pd.DataFrame({'id': test_ids_list, 'target': test_preds_list})
+    output_path = Path(args.output_folder) / args.experiment_folder / args.backbone_name
+    output_path.mkdir(exist_ok=True, parents=True)
+    print("ROC - AUC Score :", roc_auc_score(val_df.target.values, val_df.preds.values))
+    val_df.to_csv(output_path / 'oof_preds.csv', index=False)
+    test_df.to_csv(output_path / 'test_preds.csv', index=False)

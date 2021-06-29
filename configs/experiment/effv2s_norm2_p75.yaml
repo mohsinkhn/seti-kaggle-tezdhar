@@ -18,7 +18,7 @@ defaults:
 # so everything is stored in one place
 
 seed: 786
-experiment_name: effb0_norm2_p1_umixup05_corr
+experiment_name: effb0_norm2_p1_umixup05_highmomentum
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -45,8 +45,8 @@ datamodule:
   power: 1.0
   norm: 2
   channels: 1
-  min_clip: -2
-  max_clip: 2
+  min_clip: -3
+  max_clip: 3
   validation_scheme: 'StratifiedKFold'
   validation_kws:
     shuffle: True
@@ -103,6 +103,8 @@ scheduler:
   pct_start: 0.1
   div_factor: 100
   final_div_factor: 1000
+  base_momentum: 0.90
+  max_momentum: 0.99
 
 scheduler_interval: 'step'
 

@@ -34,6 +34,7 @@ class LitModel(LightningModule):
         mixup_beta: float = 1.0,
         mixup_ualpha: float = 1.0,
         mixup_ubeta: float = 0.5,
+        multiobjective: bool = False,
         **kwargs
     ):
         super().__init__()
@@ -45,13 +46,16 @@ class LitModel(LightningModule):
         self.train_accuracy = Accuracy()
         self.val_accuracy = Accuracy()
 
-    def forward(self, x: torch.Tensor):
-        return self.model(x)
+    def forward(self, x1, x2):
+        if self.hparams.multiobjective:
+            return self.model(x1, x2)
+        else:
+            return self.model(x1)
 
     def step(self, batch, use_mixup):
-        x, y = batch["im"], batch["label"]
+        x, y, x2 = batch["im"], batch["label"], batch["im2"]
         x, y1 = self._mixup_data(x, y, use_mixup)
-        logits = self.forward(x)
+        logits = self.forward(x, x2)
         logits = logits.view(-1)
         y = y.view(-1)
         loss = self.criterion(logits, y1)
@@ -134,11 +138,3 @@ class LitModel(LightningModule):
         else:
             mixed_y = lam2 * t + (1 - lam2) * t[index]
         return mixed_x, mixed_y
-
-
-# What to achieve:
-# If both 0 --> return l
-# If both 1 --> return l
-# If t == 1 and t2 == 0 ; return lam2*t # 0.3 --> 0.5
-# If t == 0 and t2 == 1 ; return  (1 - lam3)*t2 # 0.3 --> 0.1
-# 0.5 + 0.1

@@ -1,3 +1,5 @@
+import os
+import json
 from typing import List, Optional
 
 import hydra
@@ -95,6 +97,10 @@ def train(config: DictConfig) -> Optional[float]:
         logger=logger,
     )
 
+    cfg_json = OmegaConf.to_container(config, resolve=True)
+    dir_path = os.getcwd()
+    with open(f"{dir_path}/config_all.json", "w") as fp:
+        json.dump(cfg_json, fp)
     # Train the model
     log.info("Starting training!")
     trainer.fit(model=model, datamodule=datamodule)
