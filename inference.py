@@ -12,8 +12,8 @@ from torch import nn
 from tqdm import tqdm
 
 
-def load_json_config(experiment_folder, model_name, fold):
-    path = str(Path(BASE_PATH) / experiment_folder / model_name / fold / 'config_all.json')
+def load_json_config(base_path, experiment_folder, model_name, fold):
+    path = str(Path(base_path) / experiment_folder / model_name / fold / 'config_all.json')
     with open(path, "r") as fp:
         cfg = json.load(fp)
     omega_cfg = OmegaConf.create(cfg)
@@ -30,10 +30,10 @@ if __name__ == "__main__":
 
     BASE_PATH = "./logs/runs"
     USE_CKPTS = 2
-    DEVICE = 1
+    DEVICE = 0
     val_preds_list, val_labels_list, val_ids_list, test_preds_list, test_ids_list = [], [], [], [], []
     for fold in args.folds.split(","):
-        config = load_json_config(args.experiment_folder, args.backbone_name, fold)
+        config = load_json_config(BASE_PATH, args.experiment_folder, args.backbone_name, fold)
         print(config)
         config.trainer.gpus = [DEVICE]
         config.datamodule.val_fold = int(fold)
@@ -41,19 +41,10 @@ if __name__ == "__main__":
         checkpoints = list((search_path).glob("*.ckpt"))
         checkpoints = sorted(checkpoints, key=lambda x: float(x.stem.split("=")[-1]), reverse=True)[:USE_CKPTS]
 
-        if "train_transforms" in config:
-            train_transforms = hydra.utils.instantiate(config.train_transforms)
-        else:
-            train_transforms = None
-        if "test_transforms" in config:
-            test_transforms = hydra.utils.instantiate(config.test_transforms)
-        else:
-            test_transforms = None
         # Init Lightning datamodule
         print(f"Instantiating datamodule <{config.datamodule._target_}>")
-        datamodule = hydra.utils.instantiate(config.datamodule,
-                                             train_transforms=train_transforms,
-                                             test_transforms=test_transforms)
+        # config.datamodule.batch_size=8
+        datamodule = hydra.utils.instantiate(config.datamodule)
         datamodule.setup()
 
         # Init Lightning model
@@ -62,6 +53,7 @@ if __name__ == "__main__":
 
         # Init Lightning trainer
         print(f"Instantiating trainer <{config.trainer._target_}>")
+        config.trainer.precision = 32
         trainer = hydra.utils.instantiate(
             config.trainer
         )

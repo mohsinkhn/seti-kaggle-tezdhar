@@ -56,6 +56,7 @@ class LitModel(LightningModule):
         x, y, x2 = batch["im"], batch["label"], batch["im2"]
         x, y1 = self._mixup_data(x, y, use_mixup)
         logits = self.forward(x, x2)
+        logits = torch.clamp(logits, -10, 10)
         logits = logits.view(-1)
         y = y.view(-1)
         loss = self.criterion(logits, y1)
