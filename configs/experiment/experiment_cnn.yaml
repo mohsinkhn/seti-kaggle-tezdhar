@@ -18,13 +18,13 @@ defaults:
 # so everything is stored in one place
 
 seed: 7867
-experiment_name: effv2s_lr0001_ep10_6x3chan_1536x512_extsignals_all
+experiment_name: effv2s_lr0004_ep15_6x3chan_273x512_extsignals_all
 
 trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 15
+  max_epochs: 20
   gradient_clip_val: 1
   accumulate_grad_batches: 1
   weights_summary: 'top'
@@ -57,14 +57,14 @@ datamodule:
   test_folders:
     - 'test'
   
-  batch_size: 16
+  batch_size: 24
   num_workers: 8
   pin_memory: False
   val_fold: 0
   validation_scheme: 'StratifiedKFold'
   validation_kws:
     shuffle: True
-    random_state: 7867
+    random_state: 786777
     n_splits: 4
 
   train_transforms:
@@ -73,15 +73,15 @@ datamodule:
       - _target_: src.augmentations.spectogram_augmentations.MoreSignals2
         p: 0.1
       - _target_: src.augmentations.spectogram_augmentations.SwapOnOff
-        p: 0.25
+        p: 0.2
       - _target_: src.augmentations.spectogram_augmentations.VerticalShift
-        p: 0.25
+        p: 0.0
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
-        height: 273
-        width: 512
+        height: 128
+        width: 480
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.LogScaler
+      - _target_: src.augmentations.spectogram_augmentations.MADScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
@@ -91,7 +91,7 @@ datamodule:
         p: 0.5
         factor: 0.2
       - _target_: src.augmentations.spectogram_augmentations.Flip
-        p: 0.25
+        p: 0.5
         axis: 2
       # - _target_: src.augmentations.spectogram_augmentations.Flip
       #   p: 0.25
@@ -101,14 +101,14 @@ datamodule:
         axis: 2
         fraction: 0.4
       - _target_: src.augmentations.spectogram_augmentations.SpecAug
-        p: 0.25
+        p: 0.5
         axis: 1
         num_consecutive_freq: 12
         num_patches: 6
       - _target_: src.augmentations.spectogram_augmentations.SpecAug
-        p: 0.2
+        p: 0.5
         axis: 2
-        num_consecutive_freq: 2
+        num_consecutive_freq: 12
         num_patches: 6
       # - _target_: src.augmentations.spectogram_augmentations.LabelSmoothing
       #   d: 0.95
@@ -119,10 +119,10 @@ datamodule:
     transform_list:
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
-        height: 273
-        width: 512
+        height: 128
+        width: 480
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.LogScaler
+      - _target_: src.augmentations.spectogram_augmentations.MADScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
@@ -133,7 +133,7 @@ model:
   _target_: src.models.plmodels.LitModel
   base_model: 'Simple3BB'
   backbone: 'tf_efficientnetv2_s_in21ft1k'
-  dropout: 0.1
+  dropout: 0.2
   use_mixup: True
   mixup_untied: True
   mixup_alpha: 1.0
@@ -143,7 +143,7 @@ model:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 0.0003
+  lr: 0.0005
   weight_decay: 0.0001
 
 # optimizer_bb_kws:
@@ -153,8 +153,8 @@ optimizer:
 
 scheduler:
   _target_: torch.optim.lr_scheduler.OneCycleLR
-  max_lr: 0.0002
-  steps_per_epoch: 8180  # 4307, 5742, 5459, 4208
+  max_lr: 0.0006
+  steps_per_epoch: 5453  # 4307, 5742, 5459, 4208
   epochs: ${trainer.max_epochs}
   pct_start: 0.1
   div_factor: 100

@@ -305,6 +305,29 @@ class LogScaler(RandomTransform):
         return np.array(out_image), y
 
 
+def mad(arr, axis=None, keepdims=True):
+    median = np.median(arr, axis=axis, keepdims=True)
+    mad = np.median(np.abs(arr - median), axis=axis, keepdims=keepdims)
+    return mad
+
+
+class MADScaler(RandomTransform):
+    def _transform(self, image, y):
+        frames = image.shape[0]
+        out_image = []
+        for frame in range(frames):
+            im = image[frame]
+            im -= im.mean()
+            im /= im.std()
+            im -= im.min()
+            im = np.log1p(im)
+            im -= np.median(im)
+            im /= mad(im)
+            im = np.clip(im, -6, 6)
+            out_image.append(im)
+        return np.array(out_image), y
+
+
 class MoreSignals(RandomTransform):
     def __init__(self, p=0.2):
         super().__init__(p=p)
