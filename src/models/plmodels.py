@@ -65,6 +65,7 @@ class LitModel(LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int):
         loss, preds, y = self.step(batch, self.hparams["use_mixup"])
+        y = y > 0.5
         acc = self.train_accuracy(preds, y.to(torch.long))
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("train/acc", acc, on_step=True, on_epoch=True, prog_bar=False)

@@ -116,6 +116,8 @@ def train(config: DictConfig) -> Optional[float]:
         trainer=trainer,
         callbacks=callbacks,
         logger=logger,
+        optimizer=optimizer,
+        scheduler=scheduler
     )
 
     if "load_weights" in config:
