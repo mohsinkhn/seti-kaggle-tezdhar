@@ -17,8 +17,8 @@ defaults:
 # instead we define all modules and their paths directly in this config,
 # so everything is stored in one place
 
-seed: 7867
-experiment_name: effb1_lr001_ep20_6x3chan_128x512_mad2_all
+seed: 12345786
+experiment_name: effb0_lr001_ep20_6x3chan_128x512_sigmoid_all
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -71,25 +71,25 @@ datamodule:
     _target_: src.augmentations.spectogram_augmentations.Compose
     transform_list:
       - _target_: src.augmentations.spectogram_augmentations.MoreSignals2
-        p: 0.0
+        p: 0.1
       - _target_: src.augmentations.spectogram_augmentations.SwapOnOff
-        p: 0.4
+        p: 0.1
       - _target_: src.augmentations.spectogram_augmentations.VerticalShift
-        p: 0.0
+        p: 0.1
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
         height: 128
-        width: 384
+        width: 512
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.MADScaler2
+      - _target_: src.augmentations.spectogram_augmentations.SigmoidScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.TemporallyStackMultiChannels
         p: 1.0
-      - _target_: src.augmentations.spectogram_augmentations.Brightness
-        p: 0.5
-        factor: 0.2
+      # - _target_: src.augmentations.spectogram_augmentations.Brightness
+      #   p: 0.5
+      #   factor: 0.2
       - _target_: src.augmentations.spectogram_augmentations.Flip
         p: 0.5
         axis: 2
@@ -101,12 +101,12 @@ datamodule:
         axis: 2
         fraction: 0.4
       - _target_: src.augmentations.spectogram_augmentations.SpecAug
-        p: 0.5
+        p: 0.25
         axis: 1
         num_consecutive_freq: 12
         num_patches: 6
       - _target_: src.augmentations.spectogram_augmentations.SpecAug
-        p: 0.5
+        p: 0.25
         axis: 2
         num_consecutive_freq: 12
         num_patches: 6
@@ -120,9 +120,9 @@ datamodule:
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
         height: 128
-        width: 384
+        width: 512
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.MADScaler2
+      - _target_: src.augmentations.spectogram_augmentations.SigmoidScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
@@ -131,12 +131,12 @@ datamodule:
 
 model:
   _target_: src.models.plmodels.LitModel
-  base_model: 'Simple3BB'
-  backbone: 'tf_efficientnet_b1_ns'
+  base_model: 'Hybrid5BB'
+  backbone: 'tf_efficientnet_b0_ns'
   dropout: 0.1
   use_mixup: True
   mixup_untied: True
-  mixup_alpha: 1.0
+  mixup_alpha: 0.75
   mixup_beta: 1.0
   mixup_ubeta: 0.5
   multiobjective: False

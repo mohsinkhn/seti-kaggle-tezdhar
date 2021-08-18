@@ -342,6 +342,23 @@ class MADScaler2(RandomTransform):
         return np.array(out_image), y
 
 
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
+
+class SigmoidScaler(RandomTransform):
+    def _transform(self, image, y):
+        frames = image.shape[0]
+        out_image = []
+        for frame in range(frames):
+            im = image[frame]
+            im -= np.median(im)  # .median()
+            im /= mad(im)
+            im = sigmoid(im)
+            out_image.append(im)
+        return np.array(out_image), y
+
+
 class MoreSignals(RandomTransform):
     def __init__(self, p=0.2):
         super().__init__(p=p)
