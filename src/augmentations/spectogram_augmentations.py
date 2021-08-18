@@ -328,6 +328,20 @@ class MADScaler(RandomTransform):
         return np.array(out_image), y
 
 
+class MADScaler2(RandomTransform):
+    def _transform(self, image, y):
+        frames = image.shape[0]
+        out_image = []
+        for frame in range(frames):
+            im = image[frame]
+            im -= np.median(im)  # .median()
+            im /= mad(im)
+            im -= im.min()
+            im /= im.max()
+            out_image.append(im)
+        return np.array(out_image), y
+
+
 class MoreSignals(RandomTransform):
     def __init__(self, p=0.2):
         super().__init__(p=p)

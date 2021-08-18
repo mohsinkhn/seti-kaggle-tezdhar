@@ -25,12 +25,16 @@ if __name__ == "__main__":
     parser.add_argument("--experiment_folder")
     parser.add_argument("--backbone_name")
     parser.add_argument("--folds", type=str)
+    parser.add_argument("--num_tta", default=1, type=int)
+    parser.add_argument("--device", default=3, type=int)
     parser.add_argument("--output_folder", default="data/predictions")
     args = parser.parse_args()
 
     BASE_PATH = "./logs/runs"
     USE_CKPTS = 2
-    DEVICE = 0
+    DEVICE = args.device
+    NUM_TTA = args.num_tta
+    BATCH_SIZE = 48
     val_preds_list, val_labels_list, val_ids_list, test_preds_list, test_ids_list = [], [], [], [], []
     for fold in args.folds.split(","):
         config = load_json_config(BASE_PATH, args.experiment_folder, args.backbone_name, fold)
@@ -43,35 +47,54 @@ if __name__ == "__main__":
 
         # Init Lightning datamodule
         print(f"Instantiating datamodule <{config.datamodule._target_}>")
-        # config.datamodule.batch_size=8
-        datamodule = hydra.utils.instantiate(config.datamodule)
-        datamodule.setup()
-
-        # Init Lightning model
-        print(f"Instantiating model <{config.model._target_}>")
-        model = hydra.utils.instantiate(config.model)
-
-        # Init Lightning trainer
-        print(f"Instantiating trainer <{config.trainer._target_}>")
-        config.trainer.precision = 32
-        trainer = hydra.utils.instantiate(
-            config.trainer
-        )
-        trainer.logger = None
-
-        # Test the model
+        config.datamodule.batch_size = BATCH_SIZE
         val_preds_fold, test_preds_fold = [], []
-        print("Starting testing!")
-        for checkpoint in checkpoints:
-            print(f"Checking for {checkpoint}")
-            model.load_state_dict(torch.load(checkpoint, map_location=f"cuda:{DEVICE}")["state_dict"])
-            val_preds = trainer.test(model, datamodule.val_dataloader())[0]['outputs']
-            test_preds = trainer.test(model, datamodule.test_dataloader())[0]['outputs']
-            val_labels = datamodule.val_data.labels
-            val_ids = datamodule.val_data.ids
-            test_ids_list = datamodule.test_data.ids
-            val_preds_fold.append(val_preds)
-            test_preds_fold.append(test_preds)
+        powers = [0.5, 0.3, 0.7, 0.4, 0.6]
+        for i in range(NUM_TTA):
+            if i > 0:
+                config.datamodule.test_transforms = config.datamodule.train_transforms.copy()
+                num_tfms = len(config.datamodule.test_transforms.transform_list)
+                for j in range(num_tfms):
+                    tfm = config.datamodule.test_transforms.transform_list[j]['_target_']
+                    if tfm in set(['src.augmentations.spectogram_augmentations.SwapOnOff',
+                                   'src.augmentations.spectogram_augmentations.SpecAug',
+                                   'src.augmentations.spectogram_augmentations.Brightness',
+                                   'src.augmentations.spectogram_augmentations.Roll',
+                                   'src.augmentations.spectogram_augmentations.VerticalShift']):
+                        config.datamodule.test_transforms.transform_list[j]['p'] = 0
+                    if tfm in set(['src.augmentations.spectogram_augmentations.Flip']):
+                        config.datamodule.test_transforms.transform_list[j]['axis'] = 1
+                    if tfm in set(['src.augmentations.spectogram_augmentations.PowerTransform']):
+                        config.datamodule.test_transforms.transform_list[j]['power'] = powers[i]
+
+            np.random.seed = i * 786
+            datamodule = hydra.utils.instantiate(config.datamodule)
+            datamodule.setup()
+
+            # Init Lightning model
+            print(f"Instantiating model <{config.model._target_}>")
+            model = hydra.utils.instantiate(config.model)
+
+            # Init Lightning trainer
+            print(f"Instantiating trainer <{config.trainer._target_}>")
+            config.trainer.precision = 32
+            trainer = hydra.utils.instantiate(
+                config.trainer
+            )
+            trainer.logger = None
+
+            # Test the model
+            print("Starting testing!")
+            for checkpoint in checkpoints:
+                print(f"Checking for {checkpoint}")
+                model.load_state_dict(torch.load(checkpoint, map_location=f"cuda:{DEVICE}")["state_dict"])
+                val_preds = trainer.test(model, datamodule.val_dataloader())[0]['outputs']
+                test_preds = trainer.test(model, datamodule.test_dataloader())[0]['outputs']
+                val_labels = datamodule.val_data.labels
+                val_ids = datamodule.val_data.ids
+                test_ids_list = datamodule.test_data.ids
+                val_preds_fold.append(val_preds)
+                test_preds_fold.append(test_preds)
         val_preds_fold = np.mean(val_preds_fold, 0)
         test_preds_fold = np.mean(test_preds_fold, 0)
         val_preds_list.extend(val_preds_fold)

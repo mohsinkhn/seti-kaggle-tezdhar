@@ -18,7 +18,7 @@ defaults:
 # so everything is stored in one place
 
 seed: 7867
-experiment_name: effv2s_lr0004_ep15_6x3chan_273x512_extsignals_all
+experiment_name: effb1_lr001_ep20_6x3chan_128x512_mad2_all
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -57,7 +57,7 @@ datamodule:
   test_folders:
     - 'test'
   
-  batch_size: 24
+  batch_size: 32
   num_workers: 8
   pin_memory: False
   val_fold: 0
@@ -71,17 +71,17 @@ datamodule:
     _target_: src.augmentations.spectogram_augmentations.Compose
     transform_list:
       - _target_: src.augmentations.spectogram_augmentations.MoreSignals2
-        p: 0.1
+        p: 0.0
       - _target_: src.augmentations.spectogram_augmentations.SwapOnOff
-        p: 0.2
+        p: 0.4
       - _target_: src.augmentations.spectogram_augmentations.VerticalShift
         p: 0.0
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
         height: 128
-        width: 480
+        width: 384
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.MADScaler
+      - _target_: src.augmentations.spectogram_augmentations.MADScaler2
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
@@ -120,9 +120,9 @@ datamodule:
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
         height: 128
-        width: 480
+        width: 384
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.MADScaler
+      - _target_: src.augmentations.spectogram_augmentations.MADScaler2
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
         p: 1.0
@@ -132,19 +132,19 @@ datamodule:
 model:
   _target_: src.models.plmodels.LitModel
   base_model: 'Simple3BB'
-  backbone: 'tf_efficientnetv2_s_in21ft1k'
-  dropout: 0.2
+  backbone: 'tf_efficientnet_b1_ns'
+  dropout: 0.1
   use_mixup: True
   mixup_untied: True
   mixup_alpha: 1.0
-  mixup_beta: 0.5
-  mixup_ubeta: 0.25
+  mixup_beta: 1.0
+  mixup_ubeta: 0.5
   multiobjective: False
 
 optimizer:
   _target_: torch.optim.AdamW
   lr: 0.0005
-  weight_decay: 0.0001
+  weight_decay: 0.01
 
 # optimizer_bb_kws:
 #   lr: 0.0001
@@ -153,8 +153,8 @@ optimizer:
 
 scheduler:
   _target_: torch.optim.lr_scheduler.OneCycleLR
-  max_lr: 0.0006
-  steps_per_epoch: 5453  # 4307, 5742, 5459, 4208
+  max_lr: 0.001
+  steps_per_epoch: 4090  # 4307, 5742, 5459, 4208
   epochs: ${trainer.max_epochs}
   pct_start: 0.1
   div_factor: 100
