@@ -1,0 +1,192 @@
+# @package _global_
+
+# to execute this experiment run:
+# python run.py experiment=example_full.yaml
+
+defaults:
+  - override /trainer: null # override trainer to null so it's not loaded from main config defaults...
+  - override /model: null
+  - override /datamodule: null
+  - override /callbacks: null
+  - override /logger: null
+  - override /optimizer: null
+  - override /scheduler: null
+
+
+# we override default configurations with nulls to prevent them from loading at all
+# instead we define all modules and their paths directly in this config,
+# so everything is stored in one place
+
+seed: 7867
+experiment_name: effb0_lr001_ep20_6x3chan_diff
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  gpus: 1
+  min_epochs: 1
+  max_epochs: 15
+  gradient_clip_val: 1
+  accumulate_grad_batches: 1
+  weights_summary: 'top'
+  precision: 16
+  num_sanity_val_steps: 4
+  deterministic: True
+  benchmark: False
+  
+datamodule:
+  _target_: src.datamodules.pldatamodule.SetiDataModule
+  train_files:
+    - 'train_labels.csv'
+    - 'test_pseudo4.csv'
+    # - 'train_labels_old.csv'
+    # - 'test_labels_old.csv'
+  train_data_dirs:
+    - ${data_dir}
+    - ${data_dir}
+    #- ${data_dir}/old_leaky_data
+    #- ${data_dir}/old_leaky_data
+  train_folders:
+    - 'train'
+    - 'test'
+    #- 'train_old'
+    #- 'test_old'
+  test_files:
+    - 'sample_submission.csv'
+  test_data_dirs:
+    - ${data_dir}
+  test_folders:
+    - 'test'
+  
+  batch_size: 32
+  num_workers: 8
+  pin_memory: False
+  val_fold: 0
+  validation_scheme: 'StratifiedKFold'
+  validation_kws:
+    shuffle: True
+    random_state: 786777
+    n_splits: 4
+
+  train_transforms:
+    _target_: src.augmentations.spectogram_augmentations.Compose
+    transform_list:
+      - _target_: src.augmentations.spectogram_augmentations.SwapOnOff
+        p: 0.2
+      - _target_: src.augmentations.spectogram_augmentations.VerticalShift
+        p: 0.2
+      - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
+        p: 1.0
+        height: 128
+        width: 512
+        resample: 3
+      - _target_: src.augmentations.spectogram_augmentations.DiffChannelMulti
+        p: 1.0
+      - _target_: src.augmentations.spectogram_augmentations.SimpleScaler
+        p: 1.0
+      - _target_: src.augmentations.spectogram_augmentations.TemporallyStackMultiChannels
+        p: 1.0
+      # - _target_: src.augmentations.spectogram_augmentations.Brightness
+      #   p: 0.5
+      #   factor: 0.2
+      - _target_: src.augmentations.spectogram_augmentations.Flip
+        p: 0.5
+        axis: 2
+      # - _target_: src.augmentations.spectogram_augmentations.Flip
+      #   p: 0.25
+      #   axis: 0
+      - _target_: src.augmentations.spectogram_augmentations.Roll
+        p: 0.25
+        axis: 2
+        fraction: 0.4
+      - _target_: src.augmentations.spectogram_augmentations.SpecAug
+        p: 0.25
+        axis: 1
+        num_consecutive_freq: 12
+        num_patches: 3
+      - _target_: src.augmentations.spectogram_augmentations.SpecAug
+        p: 0.25
+        axis: 2
+        num_consecutive_freq: 12
+        num_patches: 3
+      # - _target_: src.augmentations.spectogram_augmentations.LabelSmoothing
+      #   d: 0.95
+      #   p: 1.0
+
+  test_transforms:
+    _target_: src.augmentations.spectogram_augmentations.Compose
+    transform_list:
+      - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
+        p: 1.0
+        height: 128
+        width: 512
+        resample: 3
+      - _target_: src.augmentations.spectogram_augmentations.DiffChannelMulti
+        p: 1.0
+      - _target_: src.augmentations.spectogram_augmentations.SimpleScaler
+        p: 1.0
+      - _target_: src.augmentations.spectogram_augmentations.TemporallyStackMultiChannels
+        p: 1.0
+
+model:
+  _target_: src.models.plmodels.LitModel
+  base_model: 'Hybrid5BB'
+  backbone: 'tf_efficientnet_b0_ns'
+  dropout: 0.1
+  use_mixup: True
+  mixup_untied: True
+  mixup_alpha: 1.0
+  mixup_beta: 1.0
+  mixup_ubeta: 0.5
+  multiobjective: False
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0005
+  weight_decay: 0.01
+
+# optimizer_bb_kws:
+#   lr: 0.0001
+#   weight_decay: 0.01
+# load_weights: "/home/mohsin_okcredit_in/projects/seti-kaggle-tezdhar/logs/runs/base_power0p5_lr002_ep40_6x3chan/tf_efficientnet_b0_ns/1/checkpoints/epoch=31-val_auc=0.8851.ckpt"
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  max_lr: 0.002
+  steps_per_epoch: 1700  # 4307, 5742, 5459, 4208
+  epochs: ${trainer.max_epochs}
+  pct_start: 0.1
+  div_factor: 100
+  final_div_factor: 1000
+  anneal_strategy: 'cos'
+  cycle_momentum: True
+
+scheduler_interval: 'step'
+
+# scheduler:
+#   _target_: torch.optim.lr_scheduler.MultiStepLR
+#   gamma: 0.1
+#   milestones: [15, 30]
+
+# scheduler_interval: 'epoch'
+
+callbacks:
+  model_checkpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: "val/auc"
+    save_top_k: 2
+    save_last: False
+    mode: "max"
+    dirpath: "checkpoints/"
+    auto_insert_metric_name: False
+    filename: "epoch={epoch}-val_auc={val/auc:.4f}"
+
+logger:
+  wandb:
+    _target_: pytorch_lightning.loggers.wandb.WandbLogger
+    project: "seti-kaggle"
+    name: "${experiment_name}_${datamodule.val_fold}_${seed}"
+    tags: ["${model.backbone}", "fold_${datamodule.val_fold}"]
+    notes: ""
+    id: 
+      _target_: wandb.util.generate_id
+

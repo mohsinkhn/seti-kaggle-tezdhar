@@ -9,5 +9,3 @@ kfold_split_seed: 12345786
 batch_size: 32
 num_workers: 0
 pin_memory: False
-power: 0.75
-norm: 1

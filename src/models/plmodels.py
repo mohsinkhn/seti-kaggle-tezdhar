@@ -56,6 +56,7 @@ class LitModel(LightningModule):
         x, y, x2 = batch["im"], batch["label"], batch["im2"]
         x, y1 = self._mixup_data(x, y, use_mixup)
         logits = self.forward(x, x2)
+        logits = torch.clamp(logits, -10, 10)
         logits = logits.view(-1)
         y = y.view(-1)
         loss = self.criterion(logits, y1)
@@ -64,6 +65,7 @@ class LitModel(LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int):
         loss, preds, y = self.step(batch, self.hparams["use_mixup"])
+        y = y > 0.5
         acc = self.train_accuracy(preds, y.to(torch.long))
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("train/acc", acc, on_step=True, on_epoch=True, prog_bar=False)

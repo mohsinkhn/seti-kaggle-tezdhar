@@ -2,13 +2,14 @@ import timm
 import torch
 from torch import nn
 import torch.nn.functional as F
+from timm.models.layers.weight_init import trunc_normal_
 
 
 class SimpleBB(nn.Module):
     def __init__(self, hparams: dict):
         super().__init__()
         self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
-        del self.model.classifier
+        # del self.model.classifier
         self.avg = nn.AdaptiveAvgPool2d((1, 1))
         self.flat = nn.Flatten()
         self.drop = nn.Dropout(hparams['dropout'])
@@ -19,20 +20,326 @@ class SimpleBB(nn.Module):
         return self.fc1(self.drop(self.flat(self.avg(x))))
 
 
-class MultiBB(nn.Module):
+class FeaturesBB(nn.Module):
     def __init__(self, hparams: dict):
         super().__init__()
-        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
-        del self.model.classifier
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
         self.avg = nn.AdaptiveAvgPool2d((1, 1))
         self.flat = nn.Flatten()
         self.drop = nn.Dropout(hparams['dropout'])
-        self.fc1 = nn.Linear(self.model.num_features * 2, 1)
+        self.fc1 = nn.Linear(self.model.num_features, 1)
 
-    def forward(self, x1, x2):
-        x1 = self.flat(self.avg(self.model.forward_features(x1)))
-        x2 = self.flat(self.avg(self.model.forward_features(x2)))
-        x = torch.cat([x1, x2], -1)
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        return self.flat(self.avg(x))
+
+
+class FasterBB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=1, num_classes=1)
+        self.model.blocks[0][0].conv_dw.stride = (2, 2)
+        # del self.model.classifier
+        # self.pool = nn.MaxPool2d((1, 2), (1, 1), padding=0)
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        #del self.model.conv_head, self.model.bn2
+        self.fc1 = nn.Linear(self.model.num_features, 1)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        return self.fc1(self.drop(self.flat(self.avg(x))))
+
+
+class Simple3BB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(self.model.num_features, 1)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        return self.fc1(self.drop(self.flat(self.avg(x))))
+
+
+class Attention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class Hybrid3BB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 256
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 1)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 256, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return self.fc1(self.drop(x))
+
+
+class Hybrid4BB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 512
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 2)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 16, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        x = x.mean(3)
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return self.fc1(self.drop(x))
+
+
+class Hybrid5BB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 512
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 2)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 24, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        x = x.mean(3)
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return self.fc1(self.drop(x))
+
+
+class Hybrid5eBB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 512
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 2)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 24 * 16, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        # x = x.mean(3)
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return self.fc1(self.drop(x))
+
+
+class Hybrid6BB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 512
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 2)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 32, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        x = x.mean(3)
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return self.fc1(self.drop(x))
+
+
+class HybridFeatures(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        dim1 = self.model.num_features
+        dim2 = 256
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 1)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 256, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        b, c, h, w = x.shape
+        x = x.view(b, c, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.fc0(x)
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
+        return x
+
+
+class Simple3Features(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # del self.model.classifier
+        self.avg = nn.AdaptiveAvgPool2d((1, 1))
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(self.model.num_features, 1)
+
+    def forward(self, x):
+        x = self.model.forward_features(x)
+        return self.flat(self.avg(x))
+
+
+class MultiBB(nn.Module):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.model = timm.create_model(hparams['backbone'], pretrained=True, in_chans=3, num_classes=1)
+        # 128 * 512 x 6
+        dim1 = self.model.num_features
+        dim2 = 512
+        self.fc0 = nn.Linear(dim1, dim2)
+        self.attn = Attention(dim2, 2)
+        self.norm1 = nn.LayerNorm(dim2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 384, dim2))
+
+        self.flat = nn.Flatten()
+        self.drop = nn.Dropout(hparams['dropout'])
+        self.fc1 = nn.Linear(dim2, 1)
+        self.init_weights()
+
+    def init_weights(self):
+        head_bias = 0.
+        trunc_normal_(self.pos_embed, std=.02)
+
+    def forward(self, x):
+        b, n, c, h, w = x.shape
+        outs = []
+        for i in range(n):
+            out = self.model.forward_features(x[:, i])  # b x c x 4 x 16
+            out = out.view(out.shape[0], out.shape[1], -1)  # b x c x 64
+            out = out.permute(0, 2, 1).contiguous()
+            out = self.fc0(out)  # b x 64 x 512
+            outs.append(out)
+
+        x = torch.cat(outs, 1)  # b x 384 x 512
+        x = x + self.drop(self.attn(self.norm1(x + self.pos_embed)))
+        x = x.mean(1)
         return self.fc1(self.drop(x))
 
 

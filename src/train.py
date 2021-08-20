@@ -12,6 +12,7 @@ from pytorch_lightning import (
     seed_everything,
 )
 from pytorch_lightning.loggers import LightningLoggerBase
+import torch
 from torchvision import transforms
 
 from src.utils import utils
@@ -36,27 +37,47 @@ def train(config: DictConfig) -> Optional[float]:
 
     # Init transforms
     log.info("Instantiating transforms")
-    if "train_transforms" in config:
-        train_transforms = hydra.utils.instantiate(config.train_transforms)
-    else:
-        train_transforms = None
-    if "test_transforms" in config:
-        test_transforms = hydra.utils.instantiate(config.test_transforms)
-    else:
-        test_transforms = None
+    # if "train_transforms" in config:
+    #     train_transforms = hydra.utils.instantiate(config.train_transforms)
+    # else:
+    #     train_transforms = None
+    # if "test_transforms" in config:
+    #     test_transforms = hydra.utils.instantiate(config.test_transforms)
+    # else:
+    #     test_transforms = None
     # Init Lightning datamodule
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule,
-                                                              train_transforms=train_transforms,
-                                                              test_transforms=test_transforms)
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
 
     # Init Lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(config.model)
-
     # Init Optimizer and Scheduler
     log.info(f"Instantiating optimizer <{config.optimizer._target_}> and scheduler <{config.scheduler._target_}>")
-    optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
+
+    if "optimizer_new_kws" in config:
+        opt_params = [
+            {
+                "params": model.model.parameters(),
+                "lr": config.optimizer_bb_kws.lr,
+                "weight_decay": config.optimizer_bb_kws.weight_decay
+            },
+            {
+                "params": model.enc.parameters()
+            },
+            {
+                "params": model.pos_embed.parameters(),
+                "weight_decay": 0.0
+            },
+            {
+                "params": model.fc1.parameters()
+            }
+        ]
+        optimizer = hydra.utils.instantiate(config.optimizer, params=opt_params)
+
+    else:
+        optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
+
     scheduler = hydra.utils.instantiate(config.scheduler, optimizer=optimizer)
     scheduler_interval = config.scheduler_interval
 
@@ -95,7 +116,12 @@ def train(config: DictConfig) -> Optional[float]:
         trainer=trainer,
         callbacks=callbacks,
         logger=logger,
+        optimizer=optimizer,
+        scheduler=scheduler
     )
+
+    if "load_weights" in config:
+        model.load_state_dict(torch.load(config.load_weights, map_location=f"cuda:{trainer.gpus[0]}"), strict=False)
 
     cfg_json = OmegaConf.to_container(config, resolve=True)
     dir_path = os.getcwd()
