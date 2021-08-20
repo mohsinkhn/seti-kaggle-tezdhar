@@ -17,14 +17,14 @@ defaults:
 # instead we define all modules and their paths directly in this config,
 # so everything is stored in one place
 
-seed: 12345786
-experiment_name: effb0_lr001_ep20_6x3chan_128x512_sigmoid_all
+seed: 7867
+experiment_name: effb0_lr001_ep20_6x3chan_diff
 
 trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 20
+  max_epochs: 15
   gradient_clip_val: 1
   accumulate_grad_batches: 1
   weights_summary: 'top'
@@ -37,19 +37,19 @@ datamodule:
   _target_: src.datamodules.pldatamodule.SetiDataModule
   train_files:
     - 'train_labels.csv'
-    # - 'test_pseudo3.csv'
-    - 'train_labels_old.csv'
-    - 'test_labels_old.csv'
+    - 'test_pseudo4.csv'
+    # - 'train_labels_old.csv'
+    # - 'test_labels_old.csv'
   train_data_dirs:
     - ${data_dir}
-    # - ${data_dir}
-    - ${data_dir}/old_leaky_data
-    - ${data_dir}/old_leaky_data
+    - ${data_dir}
+    #- ${data_dir}/old_leaky_data
+    #- ${data_dir}/old_leaky_data
   train_folders:
     - 'train'
-    # - 'test'
-    - 'train_old'
-    - 'test_old'
+    - 'test'
+    #- 'train_old'
+    #- 'test_old'
   test_files:
     - 'sample_submission.csv'
   test_data_dirs:
@@ -70,20 +70,18 @@ datamodule:
   train_transforms:
     _target_: src.augmentations.spectogram_augmentations.Compose
     transform_list:
-      - _target_: src.augmentations.spectogram_augmentations.MoreSignals2
-        p: 0.1
       - _target_: src.augmentations.spectogram_augmentations.SwapOnOff
-        p: 0.1
+        p: 0.2
       - _target_: src.augmentations.spectogram_augmentations.VerticalShift
-        p: 0.1
+        p: 0.2
       - _target_: src.augmentations.spectogram_augmentations.ResizeMulti
         p: 1.0
         height: 128
         width: 512
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.SigmoidScaler
+      - _target_: src.augmentations.spectogram_augmentations.DiffChannelMulti
         p: 1.0
-      - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
+      - _target_: src.augmentations.spectogram_augmentations.SimpleScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.TemporallyStackMultiChannels
         p: 1.0
@@ -104,12 +102,12 @@ datamodule:
         p: 0.25
         axis: 1
         num_consecutive_freq: 12
-        num_patches: 6
+        num_patches: 3
       - _target_: src.augmentations.spectogram_augmentations.SpecAug
         p: 0.25
         axis: 2
         num_consecutive_freq: 12
-        num_patches: 6
+        num_patches: 3
       # - _target_: src.augmentations.spectogram_augmentations.LabelSmoothing
       #   d: 0.95
       #   p: 1.0
@@ -122,9 +120,9 @@ datamodule:
         height: 128
         width: 512
         resample: 3
-      - _target_: src.augmentations.spectogram_augmentations.SigmoidScaler
+      - _target_: src.augmentations.spectogram_augmentations.DiffChannelMulti
         p: 1.0
-      - _target_: src.augmentations.spectogram_augmentations.AddChannelMulti2
+      - _target_: src.augmentations.spectogram_augmentations.SimpleScaler
         p: 1.0
       - _target_: src.augmentations.spectogram_augmentations.TemporallyStackMultiChannels
         p: 1.0
@@ -136,7 +134,7 @@ model:
   dropout: 0.1
   use_mixup: True
   mixup_untied: True
-  mixup_alpha: 0.75
+  mixup_alpha: 1.0
   mixup_beta: 1.0
   mixup_ubeta: 0.5
   multiobjective: False
@@ -153,8 +151,8 @@ optimizer:
 
 scheduler:
   _target_: torch.optim.lr_scheduler.OneCycleLR
-  max_lr: 0.001
-  steps_per_epoch: 4090  # 4307, 5742, 5459, 4208
+  max_lr: 0.002
+  steps_per_epoch: 1700  # 4307, 5742, 5459, 4208
   epochs: ${trainer.max_epochs}
   pct_start: 0.1
   div_factor: 100

@@ -6,6 +6,8 @@ import numpy as np
 from pathlib import Path
 import PIL
 from PIL import Image
+from scipy.ndimage.filters import laplace
+
 
 
 class RandomTransform:
@@ -257,6 +259,20 @@ class AddChannelMulti2(RandomTransform):
         return np.array(out_images), y
 
 
+class DiffChannelMulti(RandomTransform):
+    def _transform(self, image, y):
+        frames = image.shape[0]
+        out_images = []
+        for frame in range(frames):
+            im1 = image[frame]
+            onindicator = np.zeros_like(im1, dtype=np.float32)
+            if frame % 2 == 0:
+                onindicator[:, :] = 1.0
+            im = np.stack((laplace(im1), np.diff(im1, 1, append=0), onindicator))
+            out_images.append(im)
+        return np.array(out_images), y
+
+
 class SwapOnOff(RandomTransform):
     def _transform(self, image, y):
         return np.roll(image, shift=-1, axis=0), 0.0
@@ -282,7 +298,7 @@ class LabelSmoothing(RandomTransform):
         self.d = d
 
     def _transform(self, image, y):
-        return image,  y * self.d + (1 - y) * (1 - self.d)
+        return image, y * self.d + (1 - y) * (1 - self.d)
 
 
 class MovePixel(RandomTransform):
@@ -343,10 +359,14 @@ class MADScaler2(RandomTransform):
 
 
 def sigmoid(x):
-    return 1/(1+np.exp(-x))
+    return 1.0 / (1.0 + np.exp(-x))
 
 
 class SigmoidScaler(RandomTransform):
+    def __init__(self, factor=1.0, p=1.0):
+        super().__init__(p=p)
+        self.factor = factor
+
     def _transform(self, image, y):
         frames = image.shape[0]
         out_image = []
@@ -354,8 +374,33 @@ class SigmoidScaler(RandomTransform):
             im = image[frame]
             im -= np.median(im)  # .median()
             im /= mad(im)
-            im = sigmoid(im)
+            im = sigmoid(im / self.factor)
             out_image.append(im)
+        return np.array(out_image), y
+
+
+class SimpleScaler(RandomTransform):
+    def _transform(self, image, y):
+        frames = image.shape[0]
+        out_image = []
+        mean = np.mean(image)
+        std = np.std(image)
+        for i in range(3):
+            im1 = image[2 * i]
+            im2 = image[2 * i + 1]
+
+            mean1 = (np.mean(im1[0]) + np.mean(im2[0])) / 2
+            std1 = (np.std(im1[0]) + np.std(im2[0])) / 2
+            im1[0] = (im1[0] - mean1) / std1
+            im2[0] = (im2[0] - mean1) / std1
+
+            mean2 = (np.mean(im1[1]) + np.mean(im2[1])) / 2
+            std2 = (np.std(im1[1]) + np.std(im2[1])) / 2
+            im1[1] = (im1[1] - mean1) / std1
+            im2[1] = (im2[1] - mean1) / std1
+
+            out_image.append(im1.astype(np.float32))
+            out_image.append(im2.astype(np.float32))
         return np.array(out_image), y
 
 
